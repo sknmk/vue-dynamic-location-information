@@ -4,13 +4,16 @@
       <div class="col-12">
         <img src="https://www.piyagida.com/public/img/piya_logo_sm.png" alt="Piya Gıda Resmi Logosu" class="watermark"/>
         <h4 v-if="!location"><i class="ri-map-pin-2-line"></i> Konumunuz bulunuyor. </h4>
-        <div id="mapInstance"></div>
-      </div>
-      <div class="col-12">
-        <l-map ref="myMap" :center="map.center" @ready="ready">
+        <l-map ref="myMap" :center="map.center" :zoom="map.zoom" v-if="location">
           <l-tile-layer :url="map.tile" :attribution="map.attribution"></l-tile-layer>
-          <l-marker v-for="(store, index) in stores" :key="index"
-                    :lat-lng="[store.coords.latitude, store.coords.longitude]"></l-marker>
+          <l-marker :lat-lng="[location.latitude, location.longitude]">
+            <l-tooltip :content="currentLocationLabel"/>
+          </l-marker>
+          <l-circle-marker v-for="(store, index) in stores" :key="index"
+                    :lat-lng="[store.coords.latitude, store.coords.longitude]"
+          @click="showCard(store)">
+            <l-tooltip :content="store.name"/>
+          </l-circle-marker>
         </l-map>
       </div>
     </div>
@@ -21,15 +24,6 @@ html, body {
   height: 100%;
   font-family: "Inter", sans-serif;
 }
-
-.leaflet-pane, .Vue-Toastification__toast-body {
-  font-family: "Inter", sans-serif !important;
-}
-
-div#mapInstance {
-  height: 100%;
-}
-
 img.watermark {
   position: absolute;
   top: 1rem;
@@ -40,16 +34,21 @@ img.watermark {
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22);
   border-radius: 8px;
 }
+.leaflet-pane, .Vue-Toastification__toast-body, .Vue-Toastification__toast-component-body {
+  font-family: "Inter", sans-serif !important;
+}
 
 .Vue-Toastification__toast {
   backdrop-filter: blur(3px);
-  color: rgba(240, 52, 52, 1) !important;
+  color: rgb(52, 127, 240) !important;
   background: rgba(255, 255, 255, .3) !important;
 }
-
 .Vue-Toastification__progress-bar {
-  background: rgba(240, 52, 52, .3) !important;
+  background: rgb(52, 143, 240) !important;
   height: 2px !important;
+}
+.Vue-Toastification__icon {
+  font-size: 2rem
 }
 </style>
 <script>
@@ -59,7 +58,7 @@ import _ from "lodash"
 import * as geolib from "geolib"
 import ToastContent from "@/components/ToastContent"
 import InfoCard from "@/components/InfoCard"
-import {LMap, LTileLayer, LMarker} from 'vue2-leaflet'
+import {LMap, LTileLayer, LMarker, LTooltip, LCircleMarker} from 'vue2-leaflet'
 
 export default {
   name: 'Map',
@@ -72,7 +71,7 @@ export default {
       closestIndex: false,
       map: {
         tile: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        zoom: 19,
+        zoom: 14,
         attribution: '&copy; Serkan Mert Kaptan'
       },
       stores: [
@@ -111,27 +110,31 @@ export default {
   },
   mounted() {
     this.fixMarker();
-    this.init();
-    this.initLayers();
     this.refresh();
     setInterval(() => {
       this.refresh();
     }, 5000)
   },
   components: {
-    LMap, LTileLayer, LMarker
+    LMap, LTileLayer, LMarker, LTooltip, LCircleMarker
+  },
+  computed: {
+    currentLocationLabel: function () {
+      return "Güncel konumunuz. <br/> Son yenilenme: " + moment(this.location.timestamp).format("HH:mm")
+    },
+    toastOptions: function () {
+      return {
+        component: ToastContent,
+        props: {
+          location: this.stores[this.closestIndex]
+        },
+        listeners: {
+          click: () => this.showCard(this.stores[this.closestIndex]),
+        }
+      }
+    }
   },
   methods: {
-    ready() {
-      this.map.center = L.latLng(this.location.coords.latitude, this.location.coords.longitude)
-    },
-    init() {
-      this.instance = new L.Map('mapInstance');
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        attribution: '&copy; Serkan Mert Kaptan'
-      }).addTo(this.instance);
-    },
     locate() {
       if (!('geolocation' in navigator)) {
         console.error('Geolocation is not available.');
@@ -155,14 +158,9 @@ export default {
               longitude: location.coords.longitude,
               timestamp: location.timestamp
             };
-            if (this.pin) {
-              this.instance.removeLayer(this.pin);
-            } else {
-              this.instance.setView([this.location.latitude, this.location.longitude], 14)
+            if (!this.map.center) {
+              this.map.center = L.latLng(this.location.latitude, this.location.longitude)
             }
-            this.pin = new L.Marker([this.location.latitude, this.location.longitude])
-                .bindTooltip("Güncel konumunuz. <br/> Son yenilenme: " + moment(this.location.timestamp).format("HH:mm")).openTooltip()
-                .addTo(this.instance);
             this.findClosest()
           })
           .catch(reason => {
@@ -178,42 +176,17 @@ export default {
         shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
       });
     },
-    initLayers() {
-      this.instance.closeTooltip()
-      for (const i in this.layers) {
-        this.layers[i].marker = new L.CircleMarker([this.layers[i].coords.latitude, this.layers[i].coords.longitude])
-            .on('click', this.showCard(this.layers[i]), this)
-            .bindTooltip(this.layers[i].name).openTooltip()
-            .addTo(this.instance);
-      }
-    },
     findClosest() {
       let closest = geolib.findNearest({latitude: this.location.latitude, longitude: this.location.longitude},
-          _.map(this.layers, 'coords'));
-      this.closestIndex = _.findIndex(this.layers,
+          _.map(this.stores, 'coords'));
+      this.closestIndex = _.findIndex(this.stores,
           function (layer) {
             return layer.coords.latitude === closest.latitude && layer.coords.longitude === closest.longitude
           })
 
-      this.instance.closePopup();
-      this.layers[this.closestIndex].marker
-          .bindPopup("En yakın nokta: " + this.layers[this.closestIndex].name, {
-            closeButton: false
-          })
-          .openPopup()
-
-      if (this.layers[this.closestIndex].notification !== true) {
-        let toastOptions = {
-          component: ToastContent,
-          props: {
-            location: this.layers[this.closestIndex]
-          },
-          listeners: {
-            click: () => this.showCard(this.layers[this.closestIndex]),
-          }
-        };
-        this.$toast(toastOptions);
-        this.layers[this.closestIndex].notification = true
+      if (this.stores[this.closestIndex].notification !== true) {
+        this.$toast(this.toastOptions);
+        this.stores[this.closestIndex].notification = true
       }
     },
     showCard(location) {
