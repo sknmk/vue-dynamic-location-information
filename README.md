@@ -1,4 +1,6 @@
-# location-informer
+# information cards for nearest points. 
+
+![Alt text](./public/ss.jpg)
 
 ## Project setup
 ```
